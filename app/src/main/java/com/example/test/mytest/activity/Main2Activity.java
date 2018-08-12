@@ -1,8 +1,16 @@
 package com.example.test.mytest.activity;
 
+import android.app.Dialog;
 import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Message;
+import android.provider.Settings;
+import android.support.annotation.NonNull;
 import android.support.design.widget.AppBarLayout;
 import android.support.design.widget.TabLayout;
 import android.support.v4.widget.NestedScrollView;
@@ -18,6 +26,7 @@ import android.view.View;
 import android.view.Window;
 import android.widget.Button;
 import android.widget.GridView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.SimpleAdapter;
@@ -35,6 +44,8 @@ import com.baidu.mapapi.map.MapStatusUpdateFactory;
 import com.baidu.mapapi.map.MapView;
 import com.baidu.mapapi.map.Marker;
 import com.baidu.mapapi.map.MarkerOptions;
+import com.baidu.mapapi.map.MyLocationConfiguration;
+import com.baidu.mapapi.map.MyLocationData;
 import com.baidu.mapapi.map.OverlayOptions;
 import com.baidu.mapapi.model.LatLng;
 import com.baidu.mapapi.utils.CoordinateConverter;
@@ -44,6 +55,7 @@ import com.example.test.mytest.adapter.BuildingAlbumAdapter;
 import com.example.test.mytest.adapter.BuildingLayoutAdapter;
 import com.example.test.mytest.adapter.FeatureAdapter;
 import com.example.test.mytest.adapter.SameAreaAdapter;
+import com.example.test.mytest.helper.PermissionUtils;
 import com.example.test.mytest.helper.UserHelper;
 import com.example.test.mytest.utils.HttpUtil;
 import com.example.test.mytest.view.ScrollChangedScrollView;
@@ -125,9 +137,11 @@ public class Main2Activity extends AppCompatActivity {
 
     //位置及周边
     private MapView mapViewLocation;
-    private LocationClient mLocationClient = null;
-    private BDLocationListener myListener = new MyLocationListener();
-    private BaiduMap mBaiduMap;
+
+    private BDLocationListener myListener = new MyLocationListener();//继承BDAbstractLocationListener的class
+     BaiduMap mBaiduMap; //定位地图实例
+    public LocationClient mLocationClient = null; //定义LocationClient
+    boolean ifFrist = true;//判断是否是第一次进去
 
     //在线问答
     private ListView lv_answer;
@@ -173,6 +187,9 @@ public class Main2Activity extends AppCompatActivity {
         super.onResume();
         //在activity执行onResume时执行mMapView. onResume ()，实现地图生命周期管理
         mapViewLocation.onResume();
+
+        //调用LocationClient的start()方法，便可发起定位请求
+        mLocationClient.start();
     }
 
     //添加监听器
@@ -378,11 +395,18 @@ public class Main2Activity extends AppCompatActivity {
         rvBuildLayout.addItemDecoration(new SpacesItemDecoration(14));
 
         //位置及周边
-        mLocationClient = new LocationClient(getApplicationContext());     //声明LocationClient类
-        mLocationClient.registerLocationListener(myListener);    //注册监听函数
         mBaiduMap = mapViewLocation.getMap();
-        initLocation();
-        mLocationClient.start();
+        //开始定位图层
+        mBaiduMap.setMyLocationEnabled(true);
+        //设置定位图标是否有箭头
+        mBaiduMap.setMyLocationConfiguration(new MyLocationConfiguration(MyLocationConfiguration.LocationMode.FOLLOWING, true,null));
+        //声明LocationClient类
+        mLocationClient = new LocationClient(getApplicationContext());
+        //注册监听函数
+        mLocationClient.registerLocationListener(myListener);
+        if (PermissionUtils.getLocationPermissions(Main2Activity.this)) {
+            initLocation();
+        }
 
         //在线问答
         answerAdapter = new AnswerAdapter(context);
@@ -428,19 +452,45 @@ public class Main2Activity extends AppCompatActivity {
 
     private void initLocation() {
         LocationClientOption option = new LocationClientOption();
-        option.setLocationMode(LocationClientOption.LocationMode.Hight_Accuracy
-        );//可选，默认高精度，设置定位模式，高精度，低功耗，仅设备
-        option.setCoorType("bd09ll");//可选，默认gcj02，设置返回的定位结果坐标系
-        int span = 1000;
-        option.setScanSpan(span);//可选，默认0，即仅定位一次，设置发起定位请求的间隔需要大于等于1000ms才是有效的
-        option.setIsNeedAddress(true);//可选，设置是否需要地址信息，默认不需要
-        option.setOpenGps(true);//可选，默认false,设置是否使用gps
-        option.setLocationNotify(true);//可选，默认false，设置是否当gps有效时按照1S1次频率输出GPS结果
-        option.setIsNeedLocationDescribe(true);//可选，默认false，设置是否需要位置语义化结果，可以在BDLocation.getLocationDescribe里得到，结果类似于“在北京天安门附近”
-        option.setIsNeedLocationPoiList(true);//可选，默认false，设置是否需要POI结果，可以在BDLocation.getPoiList里得到
-        option.setIgnoreKillProcess(false);//可选，默认false，定位SDK内部是一个SERVICE，并放到了独立进程，设置是否在stop的时候杀死这个进程，默认杀死
-        option.SetIgnoreCacheException(false);//可选，默认false，设置是否收集CRASH信息，默认收集
-        option.setEnableSimulateGps(false);//可选，默认false，设置是否需要过滤gps仿真结果，默认需要
+        option.setLocationMode(LocationClientOption.LocationMode.Hight_Accuracy);
+        //可选，设置定位模式，默认高精度
+        //LocationMode.Hight_Accuracy：高精度；
+        //LocationMode. Battery_Saving：低功耗；
+        //LocationMode. Device_Sensors：仅使用设备；
+
+        option.setCoorType("bd09ll");
+        //可选，设置返回经纬度坐标类型，默认gcj02
+        //gcj02：国测局坐标；
+        //bd09ll：百度经纬度坐标；
+        //bd09：百度墨卡托坐标；
+        //海外地区定位，无需设置坐标类型，统一返回wgs84类型坐标
+
+//        option.setScanSpan(1000);
+        //可选，设置发起定位请求的间隔，int类型，单位ms
+        //如果设置为0，则代表单次定位，即仅定位一次，默认为0
+        //如果设置非0，需设置1000ms以上才有效
+
+        option.setOpenGps(true);
+        //可选，设置是否使用gps，默认false
+        //使用高精度和仅用设备两种定位模式的，参数必须设置为true
+
+        option.setLocationNotify(true);
+        //可选，设置是否当GPS有效时按照1S/1次频率输出GPS结果，默认false
+
+        option.setIgnoreKillProcess(false);
+        //可选，定位SDK内部是一个service，并放到了独立进程。
+        //设置是否在stop的时候杀死这个进程，默认（建议）不杀死，即setIgnoreKillProcess(true)
+
+        option.SetIgnoreCacheException(false);
+        //可选，设置是否收集Crash信息，默认收集，即参数为false
+
+        option.setWifiCacheTimeOut(5 * 60 * 1000);
+        //可选，7.2版本新增能力
+        //如果设置了该接口，首次启动定位时，会先判断当前WiFi是否超出有效期，若超出有效期，会先重新扫描WiFi，然后定位
+
+        option.setEnableSimulateGps(false);
+        //可选，设置是否需要过滤GPS仿真结果，默认需要，即参数为false
+        option.setIsNeedAddress(true);
         mLocationClient.setLocOption(option);
     }
 
@@ -586,24 +636,76 @@ public class Main2Activity extends AppCompatActivity {
     public class MyLocationListener implements BDLocationListener {
         @Override
         public void onReceiveLocation(BDLocation location) {
+            //此处的BDLocation为定位结果信息类，通过它的各种get方法可获取定位相关的全部结果
+            //以下只列举部分获取经纬度相关（常用）的结果信息
+            //更多结果信息获取说明，请参照类参考中BDLocation类中的说明
 
-            LatLng point = new LatLng(location.getLatitude(), location.getLongitude());
-            //构建Marker图标  ，这里可以自己替换
-            BitmapDescriptor bitmap = BitmapDescriptorFactory
-                    .fromResource(R.mipmap.icon_marka);
+            double latitude = location.getLatitude();    //获取纬度信息
+            double longitude = location.getLongitude();    //获取经度信息
+            float radius = location.getRadius();    //获取定位精度，默认值为0.0f
+
+            String coorType = location.getCoorType();
+            //获取经纬度坐标类型，以LocationClientOption中设置过的坐标类型为准
+
+            int errorCode = location.getLocType();
+            Log.i("---------", location.getCityCode() + "---" + latitude + "--" + longitude + "----" + coorType + "--" + location.getCountry() + "--" + location.getCity() + "--" + location.getAddrStr());
+            //获取定位类型、定位错误返回码，具体信息可参照类参考中BDLocation类中的说明
+
+           // 构造定位数据
+//            MyLocationData locData = new MyLocationData.Builder()
+//                    .accuracy(location.getRadius())
+//                    // 此处设置开发者获取到的方向信息，顺时针0-360
+//                    .direction(100).latitude(location.getLatitude())
+//                    .longitude(location.getLongitude()).build();
+
+            // 设置定位数据
+//            mBaiduMap.setMyLocationData(locData);
+
+            if (ifFrist) {
+                LatLng ll = new LatLng(location.getLatitude(),
+                        location.getLongitude());
+                MapStatusUpdate update = MapStatusUpdateFactory.newLatLng(ll);
+                // 移动到某经纬度
+                mBaiduMap.animateMapStatus(update);
+                update = MapStatusUpdateFactory.zoomBy(5f);
+                // 放大
+                mBaiduMap.animateMapStatus(update);
+
+                ifFrist = false;
+            }
+
+            // 显示个人位置图标,默认图标
+//            MyLocationData.Builder builder = new MyLocationData.Builder();
+//            builder.latitude(location.getLatitude());
+//            builder.longitude(location.getLongitude());
+//            MyLocationData data = builder.build();
+//            mBaiduMap.setMyLocationData(data);
+
+
+
+            // 充气布局
+            View view = View.inflate(Main2Activity.this, R.layout.map_scenic_maker, null);
+            // 填充数据
+            ImageView iconView = (ImageView) view.findViewById(R.id.maker_icon);
+            TextView nameView = (TextView) view.findViewById(R.id.maker_name);
+//            if(source != null){
+//                iconView.setImageBitmap(source);
+//            }
+            LatLng point = new LatLng(location.getLatitude(),
+                    location.getLongitude());
+            nameView.setText(location.getAddrStr());
+            // 构建BitmapDescriptor
+            BitmapDescriptor bitmap = BitmapDescriptorFactory.fromView(view);
             //构建MarkerOption，用于在地图上添加Marker
             OverlayOptions option = new MarkerOptions()
                     .position(point)
-                    .icon(bitmap)
-                    .zIndex(12)
-                    .draggable(true);
+                    .animateType(MarkerOptions.MarkerAnimateType.grow)
+                    .zIndex(10)
+                    .period(10)
+                    .title("place")
+                    .icon(bitmap);
             //在地图上添加Marker，并显示
-            mBaiduMap.addOverlay(option);
-
-            MapStatusUpdate u = MapStatusUpdateFactory.newLatLng(point);//使输入的点位于地图中心
-            mBaiduMap.setMapStatus(u);
-            String city=location.getCity();
-//            UserHelper.showToast(context,"城市："+city);
+            Marker marker = (Marker)mBaiduMap.addOverlay(option);
 
         }
 
@@ -691,6 +793,47 @@ public class Main2Activity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         //在activity执行onDestroy时执行mMapView.onDestroy()，实现地图生命周期管理
+        mLocationClient.stop();
         mapViewLocation.onDestroy();
+        mBaiduMap.setMyLocationEnabled(false);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        switch (requestCode) {
+            case PermissionUtils.REQUEST_LOCATION:
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                        initLocation();
+                    } else {
+                        android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(context);
+                        builder.setMessage("定位当前位置需要定位权限\n是否去设置");
+                        builder.setPositiveButton("去设置", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                Intent intent = new Intent()
+                                        .setAction(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                        .setData(Uri.fromParts("package",
+                                                context.getPackageName(), null));
+                                startActivity(intent);
+                                dialog.dismiss();
+                            }
+                        });
+                        builder.setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                dialog.dismiss();
+                            }
+                        });
+                        Dialog dialog = builder.create();
+                        dialog.setCancelable(false);
+                        dialog.show();
+                    }
+                }
+                break;
+            default:
+                break;
+        }
     }
 }

@@ -47,10 +47,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".activity.Activity_Location">
+        <activity android:name=".activity.Activity_Location"/>
 
-        </activity>
-        <activity android:name=".activity.LocationActivity"/>
     </application>
 
 </manifest>
